@@ -1,0 +1,2 @@
+podman-compose -f milvus-standalone-docker-compose.yml up -d
+podman-compose -f milvus-standalone-docker-compose.yml down
