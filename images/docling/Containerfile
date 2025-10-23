@@ -1,0 +1,33 @@
+FROM registry.access.redhat.com/ubi9/ubi:9.5 as docling-builder
+
+WORKDIR /opt/docling-build
+
+RUN curl "https://raw.githubusercontent.com/ppc64le/build-scripts/master/d/docling/docling_v2.36.0_ubi9.5.sh" > docling_v2.36.0_ubi9.5.sh && \
+    curl "https://raw.githubusercontent.com/ppc64le/build-scripts/master/d/docling/docling_v2.36.0.patch" > docling_v2.36.0.patch && \
+    curl "https://raw.githubusercontent.com/ppc64le/build-scripts/master/d/docling/opencv_docling_v2.36.0.patch" > opencv_docling_v2.36.0.patch
+RUN sed -i '/echo "Installing required packages..."/i echo "exclude=openssl-fips-provider*" >> /etc/yum.conf' docling_v2.36.0_ubi9.5.sh
+
+RUN chmod +x docling_v2.36.0_ubi9.5.sh && \
+    ./docling_v2.36.0_ubi9.5.sh --skip-tests
+
+FROM registry.access.redhat.com/ubi9/ubi:9.5
+
+RUN yum install -y git wget gcc gcc-c++ python3-devel pip python3-numpy zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran openblas-devel libxml2-devel libxslt-devel
+
+RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf config-manager --set-enabled codeready-builder-for-rhel-9-$(arch)-rpms && \
+    yum install -y gn geos-devel tesseract-devel spatialindex-devel
+
+WORKDIR /opt/wheels
+COPY --from=docling-builder /usr/local/lib64/*.so /usr/local/lib64
+ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+RUN ln /usr/local/lib64/libopenjp2.so /usr/local/lib64/libopenjp2.so.7
+
+RUN --mount=type=bind,from=docling-builder,source=/opt/docling-build/docling/dist/,target=/opt/wheels/docling-wheels/,ro \
+    --mount=type=bind,from=docling-builder,source=/opt/docling-build/Pillow/,target=/opt/wheels/pillow-wheels/,ro \
+    --mount=type=bind,from=docling-builder,source=/opt/docling-build/opencv-python/,target=/opt/wheels/opencv-wheels/,ro \
+    --mount=type=bind,from=docling-builder,source=/opt/docling-build/pytorch/dist/,target=/opt/wheels/torch-wheels/,ro \
+    --mount=type=bind,from=docling-builder,source=/opt/docling-build/pypdfium2/,target=/opt/wheels/pypdfium-wheels/,ro \
+    --mount=type=bind,from=docling-builder,source=/opt/docling-build/vision/dist/,target=/opt/wheels/torch-vision-wheels/,ro \
+    python3 -m venv /var/venv && source /var/venv/bin/activate && \
+    pip3 install scikit-image==0.19.3 "numpy<2.0" tesserocr /opt/wheels/pillow-wheels/*.whl /opt/wheels/opencv-wheels/opencv*.whl /opt/wheels/torch-wheels/*.whl /opt/wheels/pypdfium-wheels/*.whl /opt/wheels/torch-vision-wheels/*.whl /opt/wheels/docling-wheels/*.whl
